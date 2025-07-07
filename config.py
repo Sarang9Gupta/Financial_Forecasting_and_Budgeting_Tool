@@ -1,17 +1,45 @@
-# config.py
+import yfinance as yf
+import pandas as pd
 
-# Example initial budget data (monthly)
+def get_real_data(ticker_symbol, use_ttm=False):
+    ticker = yf.Ticker(ticker_symbol)
+
+    # Get annual + quarterly financials
+    annual_df = ticker.financials.T
+    quarterly_df = ticker.quarterly_financials.T
+
+    # Combine and sort chronologically
+    full_df = pd.concat([annual_df, quarterly_df])
+    full_df = full_df.sort_index()
+
+    # Drop rows where any field is missing
+    df = full_df[["Total Revenue", "Cost Of Revenue", "Operating Expense"]].dropna()
+
+    # Convert to numeric
+    df = df.astype(float)
+
+    # Optional: Convert to Trailing 12 Months (TTM) rolling sum
+    if use_ttm and len(df) >= 4:
+        df = df.rolling(window=4).sum().dropna()
+
+    revenue = df["Total Revenue"].tolist()
+    costs = df["Cost Of Revenue"].tolist()
+    opex = df["Operating Expense"].tolist()
+    net_income = [r - c - o for r, c, o in zip(revenue, costs, opex)]
+
+    return revenue, costs, opex, net_income
+
+
+
+# Set this once at app start
+TICKER = "AAPL"  # Change this dynamically via Streamlit dropdown if desired
+HISTORICAL_REVENUE, HISTORICAL_COSTS, HISTORICAL_OPERATING_EXPENSES, NET_INCOME = get_real_data(TICKER, use_ttm=True)
+
 BUDGET = {
-    'Revenue': [100000, 105000, 110000, 115000, 120000, 125000, 130000, 135000, 140000, 145000, 150000, 155000],
-    'Cost_of_Goods_Sold': [50000, 52000, 54000, 55000, 56000, 58000, 59000, 60000, 62000, 63000, 64000, 65000],
-    'Operating_Expenses': [20000, 21000, 22000, 23000, 24000, 25000, 26000, 27000, 28000, 29000, 30000, 31000],
-    'Net_Income': [30000, 32000, 33000, 34000, 35000, 36000, 37000, 38000, 39000, 40000, 41000, 42000]
+    'Revenue': HISTORICAL_REVENUE,
+    'Cost_of_Goods_Sold': HISTORICAL_COSTS,
+    'Operating_Expenses': HISTORICAL_OPERATING_EXPENSES,
+    'Net_Income': NET_INCOME
 }
 
-# Historical data for forecasting (example)
-HISTORICAL_REVENUE = [100000, 105000, 110000, 115000, 120000, 125000, 130000, 135000, 140000, 145000, 150000, 155000]
-HISTORICAL_COSTS = [50000, 52000, 54000, 55000, 56000, 58000, 59000, 60000, 61000, 62000, 63000, 64000]
-HISTORICAL_OPERATING_EXPENSES = [25000, 26000, 27000, 28000, 29000, 30000, 31000, 32000, 33000, 34000, 35000, 36000]  # Example values in USD
-
-# Forecast period (next 12 months)
-FORECAST_PERIOD = 12
+FORECAST_PERIOD = len(HISTORICAL_REVENUE)

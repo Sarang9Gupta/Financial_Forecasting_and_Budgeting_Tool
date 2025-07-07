@@ -1,60 +1,145 @@
-# main.py
-from budget import create_budget, compare_actual_vs_forecast, print_budget_report
-from forecasting import forecast_revenue, forecast_costs, forecast_operating_expenses, forecast_net_income
+import streamlit as st
+import pandas as pd
+import yfinance as yf  # ⬅️ New import
+
+from budget import compare_actual_vs_forecast
+from forecasting import (
+    forecast_revenue, forecast_costs,
+    forecast_operating_expenses, forecast_net_income
+)
 from analysis import calculate_growth_rate, calculate_profit_margin
 from visualization import plot_budget_vs_actual, plot_forecast
-from config import BUDGET, HISTORICAL_REVENUE, HISTORICAL_COSTS, HISTORICAL_OPERATING_EXPENSES, FORECAST_PERIOD
+from config import (
+    HISTORICAL_REVENUE, HISTORICAL_COSTS,
+    HISTORICAL_OPERATING_EXPENSES
+)
 
-def main():
-    # Step 1: Create the budget (use the historical data to calculate actual values)
-    actual = {
-        'Revenue': HISTORICAL_REVENUE,
-        'Cost_of_Goods_Sold': HISTORICAL_COSTS,
-        'Operating_Expenses': HISTORICAL_OPERATING_EXPENSES,
-        'Net_Income': [rev - cgs - oe for rev, cgs, oe in zip(HISTORICAL_REVENUE, HISTORICAL_COSTS, HISTORICAL_OPERATING_EXPENSES)]
+st.set_page_config(page_title="Financial Forecasting & Budgeting", layout="wide")
+st.title("📊 Financial Forecasting and Budgeting Tool")
+
+# ──────────────────────────────────────────────────────────────
+# Ticker Input & Real Data Option
+# ──────────────────────────────────────────────────────────────
+ticker = st.text_input("Enter stock ticker (e.g. AAPL, MSFT, INFY.NS):", "AAPL")
+if st.button("🔄 Load Company Financials"):
+    try:
+        tkr = yf.Ticker(ticker)
+        df = tkr.quarterly_financials.T.fillna(0)
+        revenue = df["Total Revenue"].astype(float).tolist()
+        costs = df["Cost Of Revenue"].astype(float).tolist()
+        opex = df["Operating Expense"].astype(float).tolist()
+        net = [r - c - o for r, c, o in zip(revenue, costs, opex)]
+
+        st.session_state["revenue"] = revenue
+        st.session_state["costs"] = costs
+        st.session_state["opex"] = opex
+        st.session_state["net"] = net
+        st.success(f"Loaded data for {ticker.upper()}")
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+
+# Use real data if available
+HISTORICAL_REVENUE = st.session_state.get("revenue", HISTORICAL_REVENUE)
+HISTORICAL_COSTS = st.session_state.get("costs", HISTORICAL_COSTS)
+HISTORICAL_OPERATING_EXPENSES = st.session_state.get("opex", HISTORICAL_OPERATING_EXPENSES)
+HISTORICAL_NET = st.session_state.get("net", [
+    r - c - o for r, c, o in zip(HISTORICAL_REVENUE, HISTORICAL_COSTS, HISTORICAL_OPERATING_EXPENSES)
+])
+
+# ──────────────────────────────────────────────────────────────
+# Step 1 – Historical Actuals
+# ──────────────────────────────────────────────────────────────
+st.header("Step 1 · Historical Actuals")
+actual = {
+    "Revenue": HISTORICAL_REVENUE,
+    "Cost_of_Goods_Sold": HISTORICAL_COSTS,
+    "Operating_Expenses": HISTORICAL_OPERATING_EXPENSES,
+    "Net_Income": HISTORICAL_NET
+}
+actual_df = pd.DataFrame(actual, index=range(1, len(HISTORICAL_REVENUE) + 1))
+with st.expander("📂 Show historical table"):
+    st.dataframe(actual_df, use_container_width=True)
+
+# ──────────────────────────────────────────────────────────────
+# Step 2 – Forecasts
+# ──────────────────────────────────────────────────────────────
+st.header("Step 2 · Forecasts")
+forecasted_revenue = forecast_revenue()
+forecasted_costs = forecast_costs()
+forecasted_opex = forecast_operating_expenses()
+forecasted_net_income = forecast_net_income(
+    forecasted_revenue, forecasted_costs, forecasted_opex
+)
+
+forecast = {
+    "Revenue": forecasted_revenue,
+    "Cost_of_Goods_Sold": forecasted_costs,
+    "Operating_Expenses": forecasted_opex,
+    "Net_Income": forecasted_net_income,
+}
+forecast_df = pd.DataFrame(forecast, index=range(1, len(forecasted_revenue) + 1))
+with st.expander("📈 Show forecast table"):
+    st.dataframe(forecast_df, use_container_width=True)
+
+# ──────────────────────────────────────────────────────────────
+# Step 3 – Actual vs Forecast Comparison
+# ──────────────────────────────────────────────────────────────
+st.header("Step 3 · Actual vs Forecast")
+comparison = compare_actual_vs_forecast(actual, forecast)
+comparison_df = pd.DataFrame(comparison, index=actual_df.index)
+with st.expander("🔍 Show comparison table"):
+    st.dataframe(comparison_df, use_container_width=True)
+
+# ──────────────────────────────────────────────────────────────
+# Step 4 – Key Metrics
+# ──────────────────────────────────────────────────────────────
+st.header("Step 4 · Key Metrics")
+
+def last_or_zero(lst):
+    return lst[-1] if lst else 0.0
+
+rev_growth = last_or_zero(calculate_growth_rate(HISTORICAL_REVENUE))
+cost_growth = last_or_zero(calculate_growth_rate(HISTORICAL_COSTS))
+opex_growth = last_or_zero(calculate_growth_rate(HISTORICAL_OPERATING_EXPENSES))
+profit_margin = calculate_profit_margin(
+    sum(HISTORICAL_REVENUE), sum(HISTORICAL_COSTS)
+)
+
+col1, col2 = st.columns(2)
+with col1:
+    st.metric("📈 Revenue Growth (last period)", f"{rev_growth:.2f}%")
+    st.metric("📉 Cost Growth (last period)", f"{cost_growth:.2f}%")
+with col2:
+    st.metric("💸 Opex Growth (last period)", f"{opex_growth:.2f}%")
+    st.metric("💰 Overall Profit Margin", f"{profit_margin:.2f}%")
+
+# ──────────────────────────────────────────────────────────────
+# Step 5 – Visualisations
+# ──────────────────────────────────────────────────────────────
+st.header("Step 5 · Visualisations")
+
+plot_choice = st.selectbox(
+    "Select a chart:",
+    (
+        "Revenue – Actual vs Forecast",
+        "Cost_of_Goods_Sold – Actual vs Forecast",
+        "Operating_Expenses – Actual vs Forecast",
+        "Revenue – Forecast trend",
+        "Costs – Forecast trend",
+        "Operating Expenses – Forecast trend",
+        "Net Income – Forecast trend",
+    ),
+)
+
+if "Actual vs" in plot_choice:
+    category = plot_choice.split(" – ")[0]
+    st.pyplot(plot_budget_vs_actual(actual, forecast, category))
+else:
+    label = plot_choice.split(" – ")[0]
+    data_lookup = {
+        "Revenue": forecasted_revenue,
+        "Costs": forecasted_costs,
+        "Operating Expenses": forecasted_opex,
+        "Net Income": forecasted_net_income,
     }
-
-    # Step 2: Forecast future values based on historical data
-    forecasted_revenue = forecast_revenue()
-    forecasted_costs = forecast_costs()
-    forecasted_operating_expenses = forecast_operating_expenses()
-    forecasted_net_income = forecast_net_income(forecasted_revenue, forecasted_costs, forecasted_operating_expenses)
-
-    # Step 3: Prepare the forecast dictionary
-    forecast = {
-        'Revenue': forecasted_revenue,
-        'Cost_of_Goods_Sold': forecasted_costs,
-        'Operating_Expenses': forecasted_operating_expenses,
-        'Net_Income': forecasted_net_income
-    }
-
-    # Step 4: Compare actual vs forecasted values
-    comparison = compare_actual_vs_forecast(actual, forecast)
-    
-    # Step 5: Print budget report
-    print_budget_report(actual, comparison)
-    
-    # Step 6: Perform analysis on growth rates and profit margin
-    revenue_growth_rate = calculate_growth_rate(HISTORICAL_REVENUE)
-    cost_growth_rate = calculate_growth_rate(HISTORICAL_COSTS)
-    operating_expenses_growth_rate = calculate_growth_rate(HISTORICAL_OPERATING_EXPENSES)
-    profit_margin = calculate_profit_margin(sum(HISTORICAL_REVENUE), sum(HISTORICAL_COSTS))
-
-    print("\nRevenue Growth Rate: ", revenue_growth_rate)
-    print("Cost Growth Rate: ", cost_growth_rate)
-    print("Operating Expenses Growth Rate: ", operating_expenses_growth_rate)
-    print("Profit Margin: {:.2f}%".format(profit_margin))
-    
-    # Step 7: Visualize budget vs actual
-    plot_budget_vs_actual(actual, forecast, 'Revenue')
-    plot_budget_vs_actual(actual, forecast, 'Cost_of_Goods_Sold')
-    plot_budget_vs_actual(actual, forecast, 'Operating_Expenses')
-
-    # Step 8: Visualize forecast
-    plot_forecast(forecasted_revenue, 'Revenue')
-    plot_forecast(forecasted_costs, 'Costs')
-    plot_forecast(forecasted_operating_expenses, 'Operating Expenses')
-    plot_forecast(forecasted_net_income, 'Net Income')
-
-if __name__ == "__main__":
-    main()
+    st.pyplot(plot_forecast(data_lookup[label], label))
